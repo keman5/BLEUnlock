@@ -43,3 +43,13 @@
 "use_screensaver_to_lock" = "用屏保来锁定它";
 "wake_on_proximity" = "靠近唤醒";
 "wake_without_unlocking" = "唤醒时不需解锁";
+"rules_and_settings" = "规则设置";
+"current_monitored" = "当前监控";
+"sn_last6" = "SN末6位";
+"id_last6" = "ID末6位";
+"search_devices_placeholder" = "搜索名称 / 机型 / 版本号 / 序列号后6位…";
+"password_configured" = "钥匙串密码已设置";
+"click_device_below_hint" = "请在下方设备列表中点击选择要监控的蓝牙设备";
+"status_in_unlock_range" = "在解锁范围内（靠近）";
+"status_out_of_lock_range" = "已超出锁定阈值（远离）";
+"status_in_buffer_range" = "缓冲区间（保持当前状态）";

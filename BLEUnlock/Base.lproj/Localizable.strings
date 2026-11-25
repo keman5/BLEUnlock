@@ -36,3 +36,14 @@
 "use_screensaver_to_lock" = "Use Screensaver to Lock";
 "wake_on_proximity" = "Wake on Proximity";
 "wake_without_unlocking" = "Wake without Unlocking";
+"rules_and_settings" = "Settings";
+"current_monitored" = "Monitored";
+"sn_last6" = "SN";
+"id_last6" = "ID";
+"search_devices_placeholder" = "Search name / model / OS / SN last 6…";
+"no_matching_devices" = "No matching devices";
+"password_configured" = "Password stored in Keychain";
+"click_device_below_hint" = "Select a Bluetooth device from the list below";
+"status_in_unlock_range" = "In unlock range (Close)";
+"status_out_of_lock_range" = "Beyond lock threshold (Away)";
+"status_in_buffer_range" = "Buffer zone (Maintaining state)";

@@ -15,7 +15,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     let unlockRSSIMenu = NSMenu()
     let timeoutMenu = NSMenu()
     let lockDelayMenu = NSMenu()
-    private var deviceListWindow: DeviceListWindow?
+    private lazy var menuBarPanel = MenuBarPanelViewController(ble: ble)
     private var deviceListUpdate: Timer?
     var monitorMenuItem : NSMenuItem?
     let prefs = UserDefaults.standard
@@ -76,16 +76,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         return true
     }
     
-    func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? DeviceListWindow, window === deviceListWindow else { return }
-        deviceListUpdate?.invalidate()
-        deviceListUpdate = nil
-        deviceListWindow = nil
-        ble.stopScanning()
-    }
-
     func deviceListDidChange() {
-        guard deviceListWindow != nil, deviceListUpdate == nil else { return }
+        guard menuBarPanel.isShown, deviceListUpdate == nil else { return }
         let timer = Timer(timeInterval: 0.2, repeats: false) { [weak self] _ in
             guard let self = self else { return }
             self.deviceListUpdate = nil
@@ -96,7 +88,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     }
 
     private func refreshDeviceList() {
-        deviceListWindow?.update(devices: Array(ble.devices.values), monitoredUUID: ble.monitoredUUID)
+        menuBarPanel.update(devices: Array(ble.devices.values), monitoredUUID: ble.monitoredUUID)
     }
 
     func updateRSSI(rssi: Int?, active: Bool) {
@@ -114,6 +106,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
                 statusItem.button?.image = NSImage(named: "StatusBarDisconnected")
             }
         }
+        menuBarPanel.updateMonitoredRSSI(rssi: rssi, active: active)
     }
 
     func bluetoothPowerWarn() {
@@ -348,24 +341,57 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         inScreensaver = false
     }
 
+    @objc func toggleMenuBarPanel(_ sender: Any?) {
+        guard let button = statusItem.button else { return }
+        menuBarPanel.toggle(relativeTo: button)
+    }
+
     @objc func showDeviceList() {
-        let window: DeviceListWindow
-        if let existing = deviceListWindow {
-            window = existing
-        } else {
-            window = DeviceListWindow()
-            window.delegate = self
-            window.onChoose = { [weak self] uuid in
-                self?.monitorDevice(uuid: uuid)
-                self?.prefs.set(uuid.uuidString, forKey: "device")
-            }
-            deviceListWindow = window
-            window.center()
-            refreshDeviceList()
-            ble.startScanning()
+        guard let button = statusItem.button else { return }
+        menuBarPanel.show(relativeTo: button)
+    }
+
+    private func setupMenuBarPanel() {
+        menuBarPanel.onChooseDevice = { [weak self] uuid in
+            self?.monitorDevice(uuid: uuid)
+            self?.prefs.set(uuid.uuidString, forKey: "device")
         }
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        menuBarPanel.onLockNow = { [weak self] in
+            self?.lockNow()
+        }
+        menuBarPanel.onAskPassword = { [weak self] in
+            guard let self = self else { return }
+            let reopen = self.menuBarPanel.isShown
+            self.askPassword()
+            if reopen, let button = self.statusItem.button {
+                self.menuBarPanel.show(relativeTo: button)
+            }
+        }
+        menuBarPanel.onSetMinimumRSSI = { [weak self] in
+            guard let self = self else { return }
+            let reopen = self.menuBarPanel.isShown
+            self.setRSSIThreshold()
+            if reopen, let button = self.statusItem.button {
+                self.menuBarPanel.show(relativeTo: button)
+            }
+        }
+        menuBarPanel.onTogglePassiveMode = { [weak self] passiveMode in
+            self?.ble.setPassiveMode(passiveMode)
+        }
+        menuBarPanel.onToggleLaunchAtLogin = { launchAtLogin in
+            if let bundleId = Bundle.main.bundleIdentifier {
+                SMLoginItemSetEnabled(bundleId + ".Launcher" as CFString, launchAtLogin)
+            }
+        }
+        menuBarPanel.onShowAbout = { [weak self] in
+            self?.showAboutBox()
+        }
+        menuBarPanel.onQuit = {
+            NSApp.terminate(nil)
+        }
+        menuBarPanel.hasStoredPassword = { [weak self] in
+            self?.fetchPassword(warn: false) != nil
+        }
     }
 
     func monitorDevice(uuid: UUID) {
@@ -373,6 +399,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         statusItem.button?.image = NSImage(named: "StatusBarDisconnected")
         monitorMenuItem?.title = t("not_detected")
         ble.startMonitor(uuid: uuid)
+        menuBarPanel.updateMonitoredRSSI(rssi: nil, active: false)
+        refreshDeviceList()
     }
 
     func errorModal(_ msg: String, info: String? = nil) {
@@ -662,9 +690,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     }
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        setupMenuBarPanel()
         if let button = statusItem.button {
             button.image = NSImage(named: "StatusBarDisconnected")
-            constructMenu()
+            button.target = self
+            button.action = #selector(toggleMenuBarPanel(_:))
         }
         ble.delegate = self
         if let str = prefs.string(forKey: "device") {

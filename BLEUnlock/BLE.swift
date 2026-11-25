@@ -2,14 +2,12 @@ import Foundation
 import CoreBluetooth
 import Accelerate
 
-private let GenericAccess = CBUUID(string:"1800")
-private let DeviceName = CBUUID(string:"2A00")
-private let DeviceInformation = CBUUID(string:"180A")
-private let ManufacturerName = CBUUID(string:"2A29")
-private let ModelName = CBUUID(string:"2A24")
-private let SerialNumber = CBUUID(string:"2A25")
-private let InformationServices = [GenericAccess: [DeviceName],
-                                   DeviceInformation: [ManufacturerName, ModelName, SerialNumber]]
+let DeviceInformation = CBUUID(string:"180A")
+let ManufacturerName = CBUUID(string:"2A29")
+let ModelName = CBUUID(string:"2A24")
+let SerialNumber = CBUUID(string:"2A25")
+let FirmwareRevision = CBUUID(string:"2A26")
+let SoftwareRevision = CBUUID(string:"2A28")
 let ExposureNotification = CBUUID(string:"FD6F")
 
 func getMACFromUUID(_ uuid: String) -> String? {
@@ -32,72 +30,144 @@ func getNameFromMAC(_ mac: String) -> String? {
 }
 
 class Device: NSObject {
-    let uuid: UUID
+    let uuid : UUID!
     var peripheral : CBPeripheral?
     var manufacture : String?
     var model : String?
-    var deviceName: String?
-    var advertisedName: String?
     var serialNumber: String?
+    var firmwareVersion: String?
+    var softwareVersion: String?
     var advData: Data?
     var rssi: Int = 0
     var scanTimer: Timer?
-    var informationTimer: Timer?
-    var pendingServices: Set<CBUUID> = []
-    var pendingCharacteristics: Set<CBUUID> = []
     var macAddr: String?
     var blName: String?
 
-    func refreshCachedInfo() {
-        let info = getLEDeviceInfoFromUUID(uuid.uuidString)
-        macAddr = info?.macAddr ?? getMACFromUUID(uuid.uuidString) ?? macAddr
-        blName = info?.name ?? macAddr.flatMap(getNameFromMAC) ?? blName
+    var displayModel: String? {
+        if let mod = model {
+            if let appleName = appleDeviceNames[mod] {
+                return appleName
+            }
+            if let manu = manufacture, manu != "Apple Inc." {
+                return "\(manu)/\(mod)"
+            }
+            return mod
+        }
+        return manufacture
     }
-    
+
+    var displayOSVersion: String? {
+        if let sw = softwareVersion?.trimmingCharacters(in: .whitespacesAndNewlines), !sw.isEmpty {
+            let lower = sw.lowercased()
+            if lower.hasPrefix("ios") || lower.hasPrefix("watchos") || lower.hasPrefix("ipados") || lower.hasPrefix("macos") || lower.hasPrefix("v") {
+                return sw
+            }
+            if let mod = model {
+                if mod.hasPrefix("iPhone") { return "iOS \(sw)" }
+                if mod.hasPrefix("Watch") { return "watchOS \(sw)" }
+                if mod.hasPrefix("iPad") { return "iPadOS \(sw)" }
+            }
+            return "v\(sw)"
+        }
+        if let fw = firmwareVersion?.trimmingCharacters(in: .whitespacesAndNewlines), !fw.isEmpty {
+            let lower = fw.lowercased()
+            if lower.hasPrefix("fw") || lower.hasPrefix("v") {
+                return fw
+            }
+            return "FW \(fw)"
+        }
+        return nil
+    }
+
+    var serialSuffix6: String? {
+        guard let sn = serialNumber?.trimmingCharacters(in: .whitespacesAndNewlines), !sn.isEmpty else {
+            return nil
+        }
+        return String(sn.suffix(6)).uppercased()
+    }
+
+    var shortIdentifierSuffix6: String {
+        _ = description
+        if let mac = macAddr {
+            let cleaned = mac
+                .replacingOccurrences(of: ":", with: "")
+                .replacingOccurrences(of: "-", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+            if cleaned.count >= 6 {
+                return String(cleaned.suffix(6))
+            }
+        }
+        let cleanedUUID = uuid.uuidString.replacingOccurrences(of: "-", with: "").uppercased()
+        return String(cleanedUUID.suffix(6))
+    }
+
     override var description: String {
-        if let deviceName = deviceName {
-            return deviceName
-        }
-        let names = [blName, peripheral?.name, advertisedName].compactMap { $0?.bluetoothInformation }
-        // Apple devices can advertise a generic product name in place of their configured name.
-        if let name = names.first(where: { $0 != "iPhone" && $0 != "iPad" && $0 != "Apple Watch" }) {
-            return name
-        }
-        if let model = model {
-            if let manufacture = manufacture {
-                if manufacture == "Apple Inc.", let appleName = appleDeviceNames[model] {
-                    return appleName
+        get {
+            if macAddr == nil || blName == nil {
+                if let info = getLEDeviceInfoFromUUID(uuid.description) {
+                    blName = info.name
+                    macAddr = info.macAddr
                 }
-                return "\(manufacture)/\(model)"
             }
-            return model
-        }
-        if let name = names.first ?? manufacture {
-            return name
-        }
-        if let adv = advData, adv.count >= 25 {
-            var iBeaconPrefix: [UInt16] = [0x004c, 0x1502]
-            if adv[0...3] == Data(bytes: &iBeaconPrefix, count: 4) {
-                let major = UInt16(adv[20]) << 8 | UInt16(adv[21])
-                let minor = UInt16(adv[22]) << 8 | UInt16(adv[23])
-                let tx = Int8(bitPattern: adv[24])
-                let distance = pow(10, Double(Int(tx) - rssi) / 20.0)
-                let formattedDistance = String(format: "%.1f", distance)
-                return "iBeacon [\(major), \(minor)] \(formattedDistance)m"
+            if macAddr == nil {
+                macAddr = getMACFromUUID(uuid.description)
             }
+            if let mac = macAddr {
+                if blName == nil {
+                    blName = getNameFromMAC(mac)
+                }
+                if let name = blName {
+                    // If it's just "iPhone" or "iPad", there's a chance we can get the model name in the following code
+                    if name != "iPhone" && name != "iPad" {
+                        return name
+                    }
+                }
+            }
+            if let manu = manufacture {
+                if let mod = model {
+                    if manu == "Apple Inc." && appleDeviceNames[mod] != nil {
+                        return appleDeviceNames[mod]!
+                    }
+                    return String(format: "%@/%@", manu, mod)
+                } else {
+                    return manu
+                }
+            }
+            if let name = peripheral?.name {
+                if name.trimmingCharacters(in: .whitespaces).count != 0 {
+                    return name
+                }
+            }
+            if let mod = model {
+                return mod
+            }
+            // iBeacon
+            if let adv = advData {
+                if adv.count >= 25 {
+                    var iBeaconPrefix : [uint16] = [0x004c, 0x01502]
+                    if adv[0...3] == Data(bytes: &iBeaconPrefix, count: 4) {
+                        let major = uint16(adv[20]) << 8 | uint16(adv[21])
+                        let minor = uint16(adv[22]) << 8 | uint16(adv[23])
+                        let tx = Int8(bitPattern: adv[24])
+                        let distance = pow(10, Double(Int(tx) - rssi)/20.0)
+                        let d = String(format:"%.1f", distance)
+                        return "iBeacon [\(major), \(minor)] \(d)m"
+                    }
+                }
+            }
+            if let name = blName {
+                return name
+            }
+            if let mac = macAddr {
+                return mac // better than uuid
+            }
+            return uuid.description
         }
-        return macAddr ?? uuid.uuidString
     }
 
     init(uuid _uuid: UUID) {
         uuid = _uuid
-    }
-}
-
-private extension String {
-    var bluetoothInformation: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\0")))
-        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
@@ -134,7 +204,7 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var connectionTimer : Timer? = nil
 
     func scanForPeripherals() {
-        guard centralMgr.state == .poweredOn, !centralMgr.isScanning else { return }
+        guard !centralMgr.isScanning else { return }
         centralMgr.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
         //print("Start scanning")
     }
@@ -148,6 +218,11 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         scanMode = false
         if activeModeTimer != nil {
             centralMgr.stopScan()
+        }
+        for device in devices.values {
+            if let p = device.peripheral, p != monitoredPeripheral, device.uuid != monitoredUUID {
+                centralMgr.cancelPeripheralConnection(p)
+            }
         }
     }
 
@@ -258,41 +333,15 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func resetScanTimer(device: Device) {
         device.scanTimer?.invalidate()
-        device.scanTimer = Timer.scheduledTimer(withTimeInterval: signalTimeout, repeats: false, block: { [weak device] _ in
-            guard let device = device else { return }
-            self.finishDeviceInformation(device)
+        device.scanTimer = Timer.scheduledTimer(withTimeInterval: signalTimeout, repeats: false, block: { _ in
+            if let p = device.peripheral, p != self.monitoredPeripheral, device.uuid != self.monitoredUUID {
+                self.centralMgr.cancelPeripheralConnection(p)
+            }
             self.devices.removeValue(forKey: device.uuid)
             self.delegate?.deviceListDidChange()
         })
         if let timer = device.scanTimer {
             RunLoop.main.add(timer, forMode: .common)
-        }
-    }
-
-    private func startDeviceInformation(_ device: Device, peripheral: CBPeripheral) {
-        let timer = Timer(timeInterval: 6, repeats: false) { [weak self, weak device] _ in
-            if let device = device {
-                self?.finishDeviceInformation(device)
-            }
-        }
-        device.informationTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
-        peripheral.delegate = self
-        if peripheral.state == .connected {
-            peripheral.discoverServices(Array(InformationServices.keys))
-        } else if peripheral.state == .disconnected {
-            centralMgr.connect(peripheral, options: nil)
-        }
-    }
-
-    private func finishDeviceInformation(_ device: Device) {
-        guard let timer = device.informationTimer else { return }
-        timer.invalidate()
-        device.informationTimer = nil
-        device.pendingServices.removeAll()
-        device.pendingCharacteristics.removeAll()
-        if let peripheral = device.peripheral, device.uuid != monitoredUUID || passiveMode {
-            centralMgr.cancelPeripheralConnection(peripheral)
         }
     }
 
@@ -339,59 +388,50 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             }
         }
 
-        guard scanMode else { return }
-        let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]
-        guard services?.contains(ExposureNotification) != true else { return }
-        let advertisedName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
-        if let device = devices[peripheral.identifier] {
-            device.rssi = rssi
-            device.advertisedName = advertisedName?.bluetoothInformation ?? device.advertisedName
+        if (scanMode) {
+            if let uuids = advertisementData["kCBAdvDataServiceUUIDs"] as? [CBUUID] {
+                for uuid in uuids {
+                    if uuid == ExposureNotification {
+                        //print("Device \(peripheral.identifier) Exposure Notification")
+                        return
+                    }
+                }
+            }
+            let dev = devices[peripheral.identifier]
+            var device: Device
+            if (dev == nil) {
+                device = Device(uuid: peripheral.identifier)
+                if (rssi >= thresholdRSSI) {
+                    device.peripheral = peripheral
+                    device.rssi = rssi
+                    device.advData = advertisementData["kCBAdvDataManufacturerData"] as? Data
+                    devices[peripheral.identifier] = device
+                    if peripheral != monitoredPeripheral && peripheral.identifier != monitoredUUID {
+                        central.connect(peripheral, options: nil)
+                    }
+                    delegate?.deviceListDidChange()
+                }
+            } else {
+                device = dev!
+                device.rssi = rssi
+                delegate?.deviceListDidChange()
+            }
             resetScanTimer(device: device)
-            delegate?.deviceListDidChange()
-            return
         }
-        guard rssi >= thresholdRSSI else { return }
-        let device = Device(uuid: peripheral.identifier)
-        device.peripheral = peripheral
-        device.rssi = rssi
-        device.advertisedName = advertisedName?.bluetoothInformation
-        device.advData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
-        device.refreshCachedInfo()
-        devices[device.uuid] = device
-        resetScanTimer(device: device)
-        if (advertisementData[CBAdvertisementDataIsConnectable] as? Bool) != false {
-            startDeviceInformation(device, peripheral: peripheral)
-        }
-        delegate?.deviceListDidChange()
     }
 
     func centralManager(_ central: CBCentralManager,
                         didConnect peripheral: CBPeripheral)
     {
         peripheral.delegate = self
-        if let device = devices[peripheral.identifier], device.informationTimer != nil {
-            device.refreshCachedInfo()
-            delegate?.deviceListDidChange()
-            peripheral.discoverServices(Array(InformationServices.keys))
+        if scanMode {
+            peripheral.discoverServices([DeviceInformation])
         }
         if peripheral == monitoredPeripheral && !passiveMode {
             print("Connected")
             connectionTimer?.invalidate()
             connectionTimer = nil
             peripheral.readRSSI()
-        }
-    }
-
-    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        if let device = devices[peripheral.identifier] {
-            finishDeviceInformation(device)
-        }
-    }
-
-    func peripheralDidUpdateName(_ peripheral: CBPeripheral) {
-        if let device = devices[peripheral.identifier] {
-            device.refreshCachedInfo()
-            delegate?.deviceListDidChange()
         }
     }
 
@@ -430,56 +470,68 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverServices error: Error?) {
-        guard let device = devices[peripheral.identifier], device.informationTimer != nil else { return }
-        let services = error == nil ? peripheral.services ?? [] : []
-        for service in services {
-            if let characteristics = InformationServices[service.uuid] {
-                device.pendingServices.insert(service.uuid)
-                peripheral.discoverCharacteristics(characteristics, for: service)
+        if let services = peripheral.services {
+            for service in services {
+                if service.uuid == DeviceInformation {
+                    peripheral.discoverCharacteristics([ManufacturerName, ModelName, SerialNumber, FirmwareRevision, SoftwareRevision], for: service)
+                }
             }
         }
-        finishDeviceInformationIfReady(device)
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService,
                     error: Error?)
     {
-        guard let device = devices[peripheral.identifier], device.informationTimer != nil,
-              device.pendingServices.remove(service.uuid) != nil else { return }
-        let characteristics = error == nil ? service.characteristics ?? [] : []
-        let requested = InformationServices[service.uuid] ?? []
-        for characteristic in characteristics where requested.contains(characteristic.uuid) && characteristic.properties.contains(.read) {
-            device.pendingCharacteristics.insert(characteristic.uuid)
-            peripheral.readValue(for: characteristic)
+        if let chars = service.characteristics {
+            for chara in chars {
+                if chara.uuid == ManufacturerName || chara.uuid == ModelName || chara.uuid == SerialNumber || chara.uuid == FirmwareRevision || chara.uuid == SoftwareRevision {
+                    peripheral.readValue(for:chara)
+                }
+            }
         }
-        finishDeviceInformationIfReady(device)
     }
     
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?)
     {
-        guard let device = devices[peripheral.identifier], device.informationTimer != nil,
-              device.pendingCharacteristics.remove(characteristic.uuid) != nil else { return }
-        if error == nil, let value = characteristic.value,
-           let text = String(data: value, encoding: .utf8)?.bluetoothInformation {
-            switch characteristic.uuid {
-            case DeviceName: device.deviceName = text
-            case ManufacturerName: device.manufacture = text
-            case ModelName: device.model = text
-            case SerialNumber: device.serialNumber = text
-            default: break
+        if let value = characteristic.value {
+            let str: String? = String(data: value, encoding: .utf8)
+            if let s = str?.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\0"))), !s.isEmpty {
+                if let device = devices[peripheral.identifier] {
+                    if characteristic.uuid == ManufacturerName {
+                        device.manufacture = s
+                        delegate?.deviceListDidChange()
+                    }
+                    if characteristic.uuid == ModelName {
+                        device.model = s
+                        delegate?.deviceListDidChange()
+                    }
+                    if characteristic.uuid == SerialNumber {
+                        device.serialNumber = s
+                        delegate?.deviceListDidChange()
+                    }
+                    if characteristic.uuid == FirmwareRevision {
+                        device.firmwareVersion = s
+                        delegate?.deviceListDidChange()
+                    }
+                    if characteristic.uuid == SoftwareRevision {
+                        device.softwareVersion = s
+                        delegate?.deviceListDidChange()
+                    }
+                    if device.model != nil && device.peripheral != monitoredPeripheral && device.uuid != monitoredUUID {
+                        centralMgr.cancelPeripheralConnection(peripheral)
+                    }
+                }
             }
-            delegate?.deviceListDidChange()
         }
-        finishDeviceInformationIfReady(device)
     }
-
-    private func finishDeviceInformationIfReady(_ device: Device) {
-        if device.pendingServices.isEmpty && device.pendingCharacteristics.isEmpty {
-            finishDeviceInformation(device)
-        }
+    
+    func peripheral(_ peripheral: CBPeripheral,
+                    didModifyServices invalidatedServices: [CBService])
+    {
+        peripheral.discoverServices([DeviceInformation])
     }
     //MARK:CBPeripheralDelegate end -
 
