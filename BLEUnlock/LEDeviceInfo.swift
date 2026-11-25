@@ -44,6 +44,7 @@ private func getPairedDeviceFromUUID(_ uuid: String) -> LEDeviceInfo? {
         print("failed to prepare")
         return nil
     }
+    defer { sqlite3_finalize(stmt) }
     if sqlite3_step(stmt) != SQLITE_ROW {
         return nil
     }
@@ -68,6 +69,7 @@ private func getOtherDeviceFromUUID(_ uuid: String) -> LEDeviceInfo? {
         print("failed to prepare")
         return nil
     }
+    defer { sqlite3_finalize(stmt) }
     if sqlite3_step(stmt) != SQLITE_ROW {
         return nil
     }

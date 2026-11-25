@@ -2,21 +2,21 @@ import Cocoa
 import Quartz
 import ServiceManagement
 
-func t(_ key: String) -> String {
-    return NSLocalizedString(key, comment: "")
+func t(_ key: String, _ fallback: String = "") -> String {
+    return NSLocalizedString(key, value: fallback, comment: "")
 }
 
 @NSApplicationMain
-class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation, NSUserNotificationCenterDelegate, BLEDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation, NSUserNotificationCenterDelegate, NSWindowDelegate, BLEDelegate {
     let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let ble = BLE()
     let mainMenu = NSMenu()
-    let deviceMenu = NSMenu()
     let lockRSSIMenu = NSMenu()
     let unlockRSSIMenu = NSMenu()
     let timeoutMenu = NSMenu()
     let lockDelayMenu = NSMenu()
-    var deviceDict: [UUID: NSMenuItem] = [:]
+    private var deviceListWindow: DeviceListWindow?
+    private var deviceListUpdate: Timer?
     var monitorMenuItem : NSMenuItem?
     let prefs = UserDefaults.standard
     var displaySleep = false
@@ -32,9 +32,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     var lastRSSI: Int? = nil
 
     func menuWillOpen(_ menu: NSMenu) {
-        if menu == deviceMenu {
-            ble.startScanning()
-        } else if menu == lockRSSIMenu {
+        if menu == lockRSSIMenu {
             for item in menu.items {
                 if item.tag == ble.lockRSSI {
                     item.state = .on
@@ -78,42 +76,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         return true
     }
     
-    func menuDidClose(_ menu: NSMenu) {
-        if menu == deviceMenu {
-            ble.stopScanning()
-        }
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? DeviceListWindow, window === deviceListWindow else { return }
+        deviceListUpdate?.invalidate()
+        deviceListUpdate = nil
+        deviceListWindow = nil
+        ble.stopScanning()
     }
-    
-    func menuItemTitle(device: Device) -> String {
-        var desc : String!
-        if let mac = device.macAddr {
-            let prettifiedMac = mac.replacingOccurrences(of: "-", with: ":").uppercased()
-            desc = String(format: "%@ (%@)", device.description, prettifiedMac)
-        } else {
-            desc = device.description
+
+    func deviceListDidChange() {
+        guard deviceListWindow != nil, deviceListUpdate == nil else { return }
+        let timer = Timer(timeInterval: 0.2, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            self.deviceListUpdate = nil
+            self.refreshDeviceList()
         }
-        return String(format: "%@ (%ddBm)", desc, device.rssi)
+        deviceListUpdate = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
-    
-    func newDevice(device: Device) {
-        let menuItem = deviceMenu.addItem(withTitle: menuItemTitle(device: device), action:#selector(selectDevice), keyEquivalent: "")
-        deviceDict[device.uuid] = menuItem
-        if (device.uuid == ble.monitoredUUID) {
-            menuItem.state = .on
-        }
-    }
-    
-    func updateDevice(device: Device) {
-        if let menu = deviceDict[device.uuid] {
-            menu.title = menuItemTitle(device: device)
-        }
-    }
-    
-    func removeDevice(device: Device) {
-        if let menuItem = deviceDict[device.uuid] {
-            menuItem.menu?.removeItem(menuItem)
-        }
-        deviceDict.removeValue(forKey: device.uuid)
+
+    private func refreshDeviceList() {
+        deviceListWindow?.update(devices: Array(ble.devices.values), monitoredUUID: ble.monitoredUUID)
     }
 
     func updateRSSI(rssi: Int?, active: Bool) {
@@ -365,16 +348,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         inScreensaver = false
     }
 
-    @objc func selectDevice(item: NSMenuItem) {
-        for (uuid, menuItem) in deviceDict {
-            if menuItem == item {
-                monitorDevice(uuid: uuid)
-                prefs.set(uuid.uuidString, forKey: "device")
-                menuItem.state = .on
-            } else {
-                menuItem.state = .off
+    @objc func showDeviceList() {
+        let window: DeviceListWindow
+        if let existing = deviceListWindow {
+            window = existing
+        } else {
+            window = DeviceListWindow()
+            window.delegate = self
+            window.onChoose = { [weak self] uuid in
+                self?.monitorDevice(uuid: uuid)
+                self?.prefs.set(uuid.uuidString, forKey: "device")
             }
+            deviceListWindow = window
+            window.center()
+            refreshDeviceList()
+            ble.startScanning()
         }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     func monitorDevice(uuid: UUID) {
@@ -581,10 +572,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         item = mainMenu.addItem(withTitle: t("lock_now"), action: #selector(lockNow), keyEquivalent: "")
         mainMenu.addItem(NSMenuItem.separator())
 
-        item = mainMenu.addItem(withTitle: t("device"), action: nil, keyEquivalent: "")
-        item.submenu = deviceMenu
-        deviceMenu.delegate = self
-        deviceMenu.addItem(withTitle: t("scanning"), action: nil, keyEquivalent: "")
+        mainMenu.addItem(withTitle: t("device"), action: #selector(showDeviceList), keyEquivalent: "")
 
         let unlockRSSIItem = mainMenu.addItem(withTitle: t("unlock_rssi"), action: nil, keyEquivalent: "")
         unlockRSSIItem.submenu = unlockRSSIMenu

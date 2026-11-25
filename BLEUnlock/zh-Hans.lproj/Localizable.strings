@@ -3,7 +3,12 @@
 "cancel" = "取消";
 "closer" = "⬆接近";
 "device" = "设备列表";
+"choose_device" = "选择设备";
+"device_bluetooth_address" = "蓝牙地址";
+"device_name" = "设备名称";
 "device_not_set" = "未选择设备";
+"device_serial_number" = "序列号";
+"device_signal" = "信号";
 "disabled" = "禁用";
 "enter_password" = "输入密码以解锁电脑。";
 "enter_rssi_threshold" = "输入最小RSSI";
@@ -16,6 +21,7 @@
 "minute" = "分钟";
 "minutes" = "分钟";
 "not_detected" = "未检测到信息";
+"no_matching_devices" = "没有匹配的设备";
 "notification_device_away" = "设备掉线";
 "notification_locked" = "本电脑已被BLEUnlock锁定";
 "notification_lost_signal" = "信号丢失";
@@ -27,6 +33,7 @@
 "pause_now_playing" = "锁定时暂停\"播放中\"";
 "quit" = "退出BLEUnlock";
 "scanning" = "扫描中…";
+"search_devices" = "搜索设备";
 "seconds" = "秒钟";
 "set_password" = "设置密码…";
 "set_rssi_threshold" = "设置最小RSSI…";
