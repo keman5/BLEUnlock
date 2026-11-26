@@ -204,7 +204,7 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var connectionTimer : Timer? = nil
 
     func scanForPeripherals() {
-        guard !centralMgr.isScanning else { return }
+        guard centralMgr.state == .poweredOn, !centralMgr.isScanning else { return }
         centralMgr.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
         //print("Start scanning")
     }
@@ -216,6 +216,7 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func stopScanning() {
         scanMode = false
+        guard centralMgr.state == .poweredOn else { return }
         if activeModeTimer != nil {
             centralMgr.stopScan()
         }
@@ -244,6 +245,7 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         }
         monitoredUUID = uuid
         proximityTimer?.invalidate()
+        proximityTimer = nil
         resetSignalTimer()
         presence = true
         monitoredPeripheral = nil
@@ -334,7 +336,8 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     func resetScanTimer(device: Device) {
         device.scanTimer?.invalidate()
         device.scanTimer = Timer.scheduledTimer(withTimeInterval: signalTimeout, repeats: false, block: { _ in
-            if let p = device.peripheral, p != self.monitoredPeripheral, device.uuid != self.monitoredUUID {
+            if self.centralMgr.state == .poweredOn,
+               let p = device.peripheral, p != self.monitoredPeripheral, device.uuid != self.monitoredUUID {
                 self.centralMgr.cancelPeripheralConnection(p)
             }
             self.devices.removeValue(forKey: device.uuid)
@@ -346,7 +349,7 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func connectMonitoredPeripheral() {
-        guard let p = monitoredPeripheral else { return }
+        guard centralMgr.state == .poweredOn, let p = monitoredPeripheral else { return }
 
         // Idk why but this works like a charm when 'didConnect' won't get called.
         // However, this generates warnings in the log.

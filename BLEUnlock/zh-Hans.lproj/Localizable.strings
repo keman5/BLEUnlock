@@ -40,7 +40,7 @@
 "sleep_display" = "锁定时关闭屏幕";
 "timeout" = "无信号超时";
 "unlock_rssi" = "解锁 RSSI";
-"use_screensaver_to_lock" = "用屏保来锁定它";
+"use_screensaver_to_lock" = "开启屏保";
 "wake_on_proximity" = "靠近唤醒";
 "wake_without_unlocking" = "唤醒时不需解锁";
 "rules_and_settings" = "规则设置";
@@ -53,3 +53,17 @@
 "status_in_unlock_range" = "在解锁范围内（靠近）";
 "status_out_of_lock_range" = "已超出锁定阈值（远离）";
 "status_in_buffer_range" = "缓冲区间（保持当前状态）";
+
+"hide_menu_bar_icon" = "隐藏菜单栏图标";
+"hide_menu_bar_icon_hint" = "从 Finder 或聚焦搜索重新打开 BLEUnlock，可临时显示菜单栏图标。";
+"auto_lock_paused" = "自动锁屏已暂停";
+"pause_periods" = "自动锁屏暂停时段";
+"pause_periods_button" = "自动锁屏暂停时段…";
+"pause_schedule_hint" = "按 Mac 的本地时间每天重复，时段可以跨午夜。";
+"pause_no_periods" = "未设置暂停时段";
+"pause_add_period" = "添加时段";
+"pause_remove_period" = "移除";
+"pause_start_time" = "开始时间";
+"pause_end_time" = "结束时间";
+"pause_invalid_period" = "开始时间和结束时间必须不同。";
+"pause_save" = "保存";

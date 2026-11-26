@@ -341,6 +341,9 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
     var onSetMinimumRSSI: (() -> Void)?
     var onToggleLaunchAtLogin: ((Bool) -> Void)?
     var onTogglePassiveMode: ((Bool) -> Void)?
+    var onHideMenuBarIcon: ((Bool) -> Void)?
+    var onEditPausePeriods: (() -> Void)?
+    var onClose: (() -> Void)?
     var onShowAbout: (() -> Void)?
     var onQuit: (() -> Void)?
     var hasStoredPassword: (() -> Bool)?
@@ -362,6 +365,9 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
     private let signalGauge = SignalThresholdBarView()
     private let lockScaleLabel = NSTextField(labelWithString: "")
     private let unlockScaleLabel = NSTextField(labelWithString: "")
+    private let heroPauseScheduleLabel = NSTextField(labelWithString: "")
+    private var pauseScheduleSpacing: NSLayoutConstraint?
+    private var hiddenPauseScheduleHeight: NSLayoutConstraint?
 
     // Tab Container
     private let tabContainer = NSView()
@@ -400,6 +406,7 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
 
     private let passiveModeCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let launchAtLoginCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let hideMenuBarIconCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let minRSSIButton = NSButton()
 
     // State
@@ -407,6 +414,8 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
     private var visibleEntries: [DeviceListEntry] = []
     private var liveRSSI: Int? = nil
     private var liveActiveMode: Bool = false
+    private var pausePeriods: [PausePeriod] = []
+    private var autoLockPaused = false
 
     init(ble: BLE) {
         self.ble = ble
@@ -427,16 +436,45 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
 
     func toggle(relativeTo button: NSStatusBarButton) {
         if popover.isShown {
-            popover.performClose(button)
+            close()
         } else {
             show(relativeTo: button)
         }
+    }
+
+    func close() {
+        popover.performClose(nil)
     }
 
     func show(relativeTo button: NSStatusBarButton) {
         syncControlsFromState()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
+    }
+
+    func selectSettings() {
+        _ = view
+        tabSwitcher.selectedSegment = 1
+        tabChanged()
+    }
+
+    func updatePauseSchedule(_ periods: [PausePeriod], isPaused: Bool) {
+        pausePeriods = periods
+        autoLockPaused = isPaused
+        if isViewLoaded {
+            refreshPauseScheduleLabel()
+        }
+    }
+
+    private func refreshPauseScheduleLabel() {
+        let ranges = pausePeriods.map(\.timeRange).joined(separator: " · ")
+        let status = autoLockPaused ? t("auto_lock_paused", "Auto-lock paused") : t("pause_periods", "Auto-Lock Pause Schedule")
+        heroPauseScheduleLabel.stringValue = ranges.isEmpty ? "" : "\(status)  \(ranges)"
+        heroPauseScheduleLabel.toolTip = ranges.isEmpty ? nil : heroPauseScheduleLabel.stringValue
+        heroPauseScheduleLabel.textColor = autoLockPaused ? .systemOrange : .secondaryLabelColor
+        heroPauseScheduleLabel.isHidden = ranges.isEmpty
+        pauseScheduleSpacing?.constant = ranges.isEmpty ? 0 : 4
+        hiddenPauseScheduleHeight?.isActive = ranges.isEmpty
     }
 
     // MARK: - NSPopoverDelegate
@@ -446,11 +484,11 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         update(devices: Array(ble.devices.values), monitoredUUID: ble.monitoredUUID)
         ble.startScanning()
         scanDot.isHidden = false
-        scanStatusLabel.stringValue = t("scanning", "扫描中…")
     }
 
     func popoverDidClose(_ notification: Notification) {
         ble.stopScanning()
+        onClose?()
     }
 
     // MARK: - View Construction
@@ -598,6 +636,8 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         heroRSSILabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
         heroRSSILabel.textColor = .labelColor
         heroRSSILabel.alignment = .right
+        heroPauseScheduleLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        heroPauseScheduleLabel.lineBreakMode = .byTruncatingTail
 
         let farLabel = NSTextField(labelWithString: "-100 dBm")
         farLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
@@ -617,11 +657,14 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         scaleRow.orientation = .horizontal
         scaleRow.distribution = .equalSpacing
 
-        for v in [heroDot, heroNameLabel, heroModeBadge, heroMetaLabel, lockNowButton, heroStateLabel, heroRSSILabel, signalGauge, scaleRow] as [NSView] {
+        for v in [heroDot, heroNameLabel, heroModeBadge, heroMetaLabel, lockNowButton, heroStateLabel, heroRSSILabel, signalGauge, scaleRow, heroPauseScheduleLabel] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             heroCard.addSubview(v)
         }
 
+        let scheduleSpacing = heroPauseScheduleLabel.topAnchor.constraint(equalTo: scaleRow.bottomAnchor)
+        pauseScheduleSpacing = scheduleSpacing
+        hiddenPauseScheduleHeight = heroPauseScheduleLabel.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             heroDot.leadingAnchor.constraint(equalTo: heroCard.leadingAnchor, constant: 12),
             heroDot.centerYAnchor.constraint(equalTo: heroNameLabel.centerYAnchor),
@@ -657,8 +700,12 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
             scaleRow.topAnchor.constraint(equalTo: signalGauge.bottomAnchor, constant: 4),
             scaleRow.leadingAnchor.constraint(equalTo: signalGauge.leadingAnchor),
             scaleRow.trailingAnchor.constraint(equalTo: signalGauge.trailingAnchor),
-            scaleRow.bottomAnchor.constraint(equalTo: heroCard.bottomAnchor, constant: -9)
+            scheduleSpacing,
+            heroPauseScheduleLabel.leadingAnchor.constraint(equalTo: scaleRow.leadingAnchor),
+            heroPauseScheduleLabel.trailingAnchor.constraint(equalTo: scaleRow.trailingAnchor),
+            heroPauseScheduleLabel.bottomAnchor.constraint(equalTo: heroCard.bottomAnchor, constant: -9)
         ])
+        refreshPauseScheduleLabel()
     }
 
     private func buildDeviceTabView() {
@@ -853,7 +900,7 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         sleepDisplayCheck.target = self
         sleepDisplayCheck.action = #selector(togglePrefCheckbox(_:))
 
-        screensaverCheck.title = t("use_screensaver_to_lock", "用屏保来锁定它")
+        screensaverCheck.title = t("use_screensaver_to_lock", "开启屏保")
         screensaverCheck.font = NSFont.systemFont(ofSize: 12)
         screensaverCheck.target = self
         screensaverCheck.action = #selector(togglePrefCheckbox(_:))
@@ -922,7 +969,30 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
             systemBox.heightAnchor.constraint(equalToConstant: 34)
         ])
 
-        for v in [thresholdBox, behaviorBox, systemBox] {
+        let preferencesBox = makeSettingsSectionBox()
+        let scheduleButton = NSButton(title: t("pause_periods_button", "Auto-Lock Schedule…"),
+                                      target: self, action: #selector(handlePauseSchedule))
+        let aboutButton = NSButton(title: t("about", "About BLEUnlock"),
+                                   target: self, action: #selector(handleAbout))
+        for button in [scheduleButton, aboutButton] {
+            button.bezelStyle = .rounded
+            button.controlSize = .small
+            button.font = .systemFont(ofSize: 11)
+        }
+        hideMenuBarIconCheck.title = t("hide_menu_bar_icon", "Hide Menu Bar Icon")
+        hideMenuBarIconCheck.toolTip = t("hide_menu_bar_icon_hint", "Reopen BLEUnlock from Finder or Spotlight to show the icon temporarily.")
+        hideMenuBarIconCheck.font = .systemFont(ofSize: 12)
+        hideMenuBarIconCheck.target = self
+        hideMenuBarIconCheck.action = #selector(togglePrefCheckbox(_:))
+
+        let preferences = NSStackView(views: [scheduleButton, hideMenuBarIconCheck, aboutButton])
+        preferences.alignment = .centerY
+        preferences.distribution = .equalSpacing
+        preferences.spacing = 6
+        preferences.translatesAutoresizingMaskIntoConstraints = false
+        preferencesBox.addSubview(preferences)
+
+        for v in [thresholdBox, behaviorBox, systemBox, preferencesBox] {
             settingsTabView.addSubview(v)
         }
 
@@ -938,7 +1008,14 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
             systemBox.topAnchor.constraint(equalTo: behaviorBox.bottomAnchor, constant: 8),
             systemBox.leadingAnchor.constraint(equalTo: settingsTabView.leadingAnchor),
             systemBox.trailingAnchor.constraint(equalTo: settingsTabView.trailingAnchor),
-            systemBox.bottomAnchor.constraint(lessThanOrEqualTo: settingsTabView.bottomAnchor)
+            preferencesBox.topAnchor.constraint(equalTo: systemBox.bottomAnchor, constant: 8),
+            preferencesBox.leadingAnchor.constraint(equalTo: settingsTabView.leadingAnchor),
+            preferencesBox.trailingAnchor.constraint(equalTo: settingsTabView.trailingAnchor),
+            preferencesBox.bottomAnchor.constraint(lessThanOrEqualTo: settingsTabView.bottomAnchor),
+            preferencesBox.heightAnchor.constraint(equalToConstant: 34),
+            preferences.leadingAnchor.constraint(equalTo: preferencesBox.leadingAnchor, constant: 10),
+            preferences.trailingAnchor.constraint(equalTo: preferencesBox.trailingAnchor, constant: -10),
+            preferences.centerYAnchor.constraint(equalTo: preferencesBox.centerYAnchor)
         ])
     }
 
@@ -947,17 +1024,12 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         footerCountLabel.font = NSFont.systemFont(ofSize: 11)
         footerCountLabel.textColor = .secondaryLabelColor
 
-        let aboutButton = NSButton(title: t("about", "关于 BLEUnlock"), target: self, action: #selector(handleAbout))
-        aboutButton.isBordered = false
-        aboutButton.font = NSFont.systemFont(ofSize: 11.5)
-        aboutButton.contentTintColor = .secondaryLabelColor
-
         let quitButton = NSButton(title: t("quit", "退出 BLEUnlock"), target: self, action: #selector(handleQuit))
         quitButton.isBordered = false
         quitButton.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
         quitButton.contentTintColor = .systemRed
 
-        for v in [footerCountLabel, aboutButton, quitButton] as [NSView] {
+        for v in [footerCountLabel, quitButton] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             bar.addSubview(v)
         }
@@ -965,9 +1037,6 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         NSLayoutConstraint.activate([
             footerCountLabel.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
             footerCountLabel.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-
-            aboutButton.trailingAnchor.constraint(equalTo: quitButton.leadingAnchor, constant: -12),
-            aboutButton.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
 
             quitButton.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
             quitButton.centerYAnchor.constraint(equalTo: bar.centerYAnchor)
@@ -1052,6 +1121,7 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         screensaverCheck.state = prefs.bool(forKey: "screensaver") ? .on : .off
         passiveModeCheck.state = prefs.bool(forKey: "passiveMode") ? .on : .off
         launchAtLoginCheck.state = prefs.bool(forKey: "launchAtLogin") ? .on : .off
+        hideMenuBarIconCheck.state = prefs.bool(forKey: "hideMenuBarIcon") ? .on : .off
 
         let pwStored = hasStoredPassword?() ?? false
         passwordStatusLabel.stringValue = pwStored
@@ -1265,6 +1335,11 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         case launchAtLoginCheck:
             prefs.set(isOn, forKey: "launchAtLogin")
             onToggleLaunchAtLogin?(isOn)
+        case hideMenuBarIconCheck:
+            onHideMenuBarIcon?(isOn)
+            if isOn {
+                popover.performClose(nil)
+            }
         default:
             break
         }
@@ -1284,6 +1359,11 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
     @objc private func handleAbout() {
         popover.performClose(nil)
         onShowAbout?()
+    }
+
+    @objc private func handlePauseSchedule() {
+        popover.performClose(nil)
+        onEditPausePeriods?()
     }
 
     @objc private func handleQuit() {

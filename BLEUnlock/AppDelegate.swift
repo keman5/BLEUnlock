@@ -17,6 +17,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     let lockDelayMenu = NSMenu()
     private lazy var menuBarPanel = MenuBarPanelViewController(ble: ble)
     private var deviceListUpdate: Timer?
+    private var pausePeriods: [PausePeriod] = []
+    private var pauseScheduleTimer: Timer?
+    private var pauseScheduleWindow: PauseScheduleWindow?
+    private var deferredAutoLockReason: String?
+    private var hasActivated = false
     var monitorMenuItem : NSMenuItem?
     let prefs = UserDefaults.standard
     var displaySleep = false
@@ -194,6 +199,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
 
     func updatePresence(presence: Bool, reason: String) {
         if presence {
+            deferredAutoLockReason = nil
             if ble.unlockRSSI != ble.UNLOCK_DISABLED {
                 if let un = userNotification {
                     NSUserNotificationCenter.default.removeDeliveredNotification(un)
@@ -210,14 +216,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
                 tryUnlockScreen()
             }
         } else {
-            if (!isScreenLocked() && ble.lockRSSI != ble.LOCK_DISABLED) {
-                pauseNowPlaying()
-                lockOrSaveScreen()
-                notifyUser(reason)
-                runScript(reason)
-            }
+            autoLockIfNeeded(reason: reason)
             manualLock = false
         }
+    }
+
+    private func autoLockIfNeeded(reason: String) {
+        guard ble.lockRSSI != ble.LOCK_DISABLED, !isScreenLocked() else { return }
+        if isInPausePeriod {
+            deferredAutoLockReason = reason
+            return
+        }
+        pauseNowPlaying()
+        lockOrSaveScreen()
+        notifyUser(reason)
+        runScript(reason)
     }
 
     func fakeKeyStrokes(_ string: String) {
@@ -271,6 +284,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         guard !self.prefs.bool(forKey: "wakeWithoutUnlocking") else { return }
 
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false, block: { _ in
+            guard self.ble.presence else { return }
             guard self.isScreenLocked() else { return }
             guard let password = self.fetchPassword(warn: true) else { return }
             
@@ -288,6 +302,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         displaySleep = false
         wakeTimer?.invalidate()
         wakeTimer = nil
+        refreshPauseSchedule()
         tryUnlockScreen()
     }
 
@@ -298,10 +313,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
 
     @objc func onSystemWake() {
         print("system wake")
+        refreshPauseSchedule()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: false, block: { _ in
             print("delayed system wake job")
-            NSApp.setActivationPolicy(.accessory) // Hide Dock icon again
+            NSApp.setActivationPolicy(.accessory)
             self.systemSleep = false
+            if self.ble.activeModeTimer == nil {
+                self.ble.scanForPeripherals()
+            }
+            self.refreshPauseSchedule()
             self.tryUnlockScreen()
         })
     }
@@ -312,7 +332,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         // Set activation policy to regular, so the CBCentralManager can scan for peripherals
         // when the Bluetooth will become on again.
         // This enables Dock icon but the screen is off anyway.
-        NSApp.setActivationPolicy(.regular)
+        if !prefs.bool(forKey: "hideMenuBarIcon") {
+            NSApp.setActivationPolicy(.regular)
+        }
     }
 
     @objc func onUnlock() {
@@ -351,6 +373,95 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         menuBarPanel.show(relativeTo: button)
     }
 
+    private var isInPausePeriod: Bool {
+        let minute = PausePeriod.minute(of: Date())
+        return pausePeriods.contains { $0.contains(minute) }
+    }
+
+    @objc private func refreshPauseSchedule() {
+        pauseScheduleTimer?.invalidate()
+        pauseScheduleTimer = nil
+        let paused = isInPausePeriod
+        menuBarPanel.updatePauseSchedule(pausePeriods, isPaused: paused)
+        if !paused, !systemSleep, let reason = deferredAutoLockReason {
+            deferredAutoLockReason = nil
+            if !ble.presence {
+                autoLockIfNeeded(reason: reason)
+            }
+        }
+        guard !pausePeriods.isEmpty else { return }
+        let now = Date()
+        let nextMinute = Calendar.autoupdatingCurrent.dateInterval(of: .minute, for: now)?.end
+            ?? now.addingTimeInterval(60)
+        let timer = Timer(fire: nextMinute, interval: 0, repeats: false) { [weak self] _ in
+            self?.refreshPauseSchedule()
+        }
+        pauseScheduleTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func showPauseSchedule() {
+        if let window = pauseScheduleWindow {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        let window = PauseScheduleWindow(periods: pausePeriods)
+        window.onSave = { [weak self] periods in
+            guard let self = self, let data = try? JSONEncoder().encode(periods) else { return }
+            self.pausePeriods = periods
+            self.prefs.set(data, forKey: "autoLockPausePeriods")
+            self.refreshPauseSchedule()
+        }
+        window.delegate = self
+        pauseScheduleWindow = window
+        window.center()
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === pauseScheduleWindow {
+            pauseScheduleWindow = nil
+        }
+    }
+
+    private func setMenuBarIconHidden(_ hidden: Bool) {
+        prefs.set(hidden, forKey: "hideMenuBarIcon")
+        NSApp.setActivationPolicy(.accessory)
+        statusItem.isVisible = !hidden
+    }
+
+    private func revealMenuBarSettings() {
+        statusItem.isVisible = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.statusItem.isVisible, NSApp.isActive,
+                  !self.menuBarPanel.isShown else { return }
+            self.menuBarPanel.selectSettings()
+            self.showDeviceList()
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard prefs.bool(forKey: "hideMenuBarIcon") else { return true }
+        revealMenuBarSettings()
+        NSApp.activate(ignoringOtherApps: true)
+        return false
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        let firstActivation = !hasActivated
+        hasActivated = true
+        if prefs.bool(forKey: "hideMenuBarIcon") && (firstActivation || statusItem.isVisible) {
+            revealMenuBarSettings()
+        }
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        guard prefs.bool(forKey: "hideMenuBarIcon") else { return }
+        menuBarPanel.close()
+        statusItem.isVisible = false
+    }
+
     private func setupMenuBarPanel() {
         menuBarPanel.onChooseDevice = { [weak self] uuid in
             self?.monitorDevice(uuid: uuid)
@@ -386,6 +497,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         menuBarPanel.onShowAbout = { [weak self] in
             self?.showAboutBox()
         }
+        menuBarPanel.onEditPausePeriods = { [weak self] in
+            self?.showPauseSchedule()
+        }
+        menuBarPanel.onHideMenuBarIcon = { [weak self] hidden in
+            self?.setMenuBarIconHidden(hidden)
+        }
+        menuBarPanel.onClose = { [weak self] in
+            guard let self = self else { return }
+            self.statusItem.isVisible = !self.prefs.bool(forKey: "hideMenuBarIcon")
+        }
         menuBarPanel.onQuit = {
             NSApp.terminate(nil)
         }
@@ -395,6 +516,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     }
 
     func monitorDevice(uuid: UUID) {
+        deferredAutoLockReason = nil
         connected = false
         statusItem.button?.image = NSImage(named: "StatusBarDisconnected")
         monitorMenuItem?.title = t("not_detected")
@@ -671,8 +793,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
                          keyEquivalent: "")
 
         mainMenu.addItem(NSMenuItem.separator())
-        mainMenu.addItem(withTitle: t("about"), action: #selector(showAboutBox), keyEquivalent: "")
-        mainMenu.addItem(NSMenuItem.separator())
         mainMenu.addItem(withTitle: t("quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         statusItem.menu = mainMenu
     }
@@ -697,6 +817,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
             button.action = #selector(toggleMenuBarPanel(_:))
         }
         ble.delegate = self
+        if let data = prefs.data(forKey: "autoLockPausePeriods") ?? prefs.data(forKey: "bluetoothPausePeriods"),
+           let periods = try? JSONDecoder().decode([PausePeriod].self, from: data) {
+            pausePeriods = periods.filter(\.isValid)
+        }
+        refreshPauseSchedule()
         if let str = prefs.string(forKey: "device") {
             if let uuid = UUID(uuidString: str) {
                 monitorDevice(uuid: uuid)
@@ -731,6 +856,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         nc.addObserver(self, selector: #selector(onDisplayWake), name: NSWorkspace.screensDidWakeNotification, object: nil)
         nc.addObserver(self, selector: #selector(onSystemSleep), name: NSWorkspace.willSleepNotification, object: nil)
         nc.addObserver(self, selector: #selector(onSystemWake), name: NSWorkspace.didWakeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(refreshPauseSchedule),
+                                               name: .NSSystemClockDidChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(refreshPauseSchedule),
+                                               name: .NSSystemTimeZoneDidChange, object: nil)
 
         let dnc = DistributedNotificationCenter.default
         dnc.addObserver(self, selector: #selector(onUnlock), name: NSNotification.Name(rawValue: "com.apple.screenIsUnlocked"), object: nil)
@@ -743,10 +872,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         checkAccessibility()
         checkUpdate()
 
-        // Hide dock icon.
-        // This is required because we can't have LSUIElement set to true in Info.plist,
-        // otherwise CBCentralManager.scanForPeripherals won't work.
-        NSApp.setActivationPolicy(.accessory)
+        setMenuBarIconHidden(prefs.bool(forKey: "hideMenuBarIcon"))
+        if prefs.bool(forKey: "hideMenuBarIcon") && NSApp.isActive {
+            revealMenuBarSettings()
+        }
     }
     
     func applicationWillTerminate(_ aNotification: Notification) {

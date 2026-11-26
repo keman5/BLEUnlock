@@ -47,3 +47,17 @@
 "status_in_unlock_range" = "In unlock range (Close)";
 "status_out_of_lock_range" = "Beyond lock threshold (Away)";
 "status_in_buffer_range" = "Buffer zone (Maintaining state)";
+
+"hide_menu_bar_icon" = "Hide Menu Bar Icon";
+"hide_menu_bar_icon_hint" = "Reopen BLEUnlock from Finder or Spotlight to show the icon temporarily.";
+"auto_lock_paused" = "Auto-lock paused";
+"pause_periods" = "Auto-Lock Pause Schedule";
+"pause_periods_button" = "Auto-Lock Schedule…";
+"pause_schedule_hint" = "Repeats daily in your Mac’s local time. A period can cross midnight.";
+"pause_no_periods" = "No pause periods";
+"pause_add_period" = "Add Period";
+"pause_remove_period" = "Remove";
+"pause_start_time" = "Start time";
+"pause_end_time" = "End time";
+"pause_invalid_period" = "Start and end times must be different.";
+"pause_save" = "Save";
