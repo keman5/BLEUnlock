@@ -328,7 +328,7 @@ private final class DeviceCardRowView: NSTableCellView {
 
 final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSPopoverDelegate {
     static let panelWidth: CGFloat = 450
-    static let panelHeight: CGFloat = 530
+    static let panelHeight: CGFloat = 660
 
     let popover = NSPopover()
     private let ble: BLE
@@ -343,7 +343,6 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
     var onTogglePassiveMode: ((Bool) -> Void)?
     var onHideMenuBarIcon: ((Bool) -> Void)?
     var onEditPausePeriods: (() -> Void)?
-    var onClose: (() -> Void)?
     var onShowAbout: (() -> Void)?
     var onQuit: (() -> Void)?
     var hasStoredPassword: (() -> Bool)?
@@ -488,7 +487,6 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
 
     func popoverDidClose(_ notification: Notification) {
         ble.stopScanning()
-        onClose?()
     }
 
     // MARK: - View Construction
@@ -548,7 +546,7 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
 
             footerBar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
             footerBar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
-            footerBar.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+            footerBar.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
             footerBar.heightAnchor.constraint(equalToConstant: 24)
         ])
 
@@ -801,23 +799,31 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         lockSlider.target = self
         lockSlider.action = #selector(lockSliderChanged)
 
-        let delayTitle = NSTextField(labelWithString: t("lock_delay", "延迟锁定"))
+        let delayTitle = NSTextField(labelWithString: t("lock_delay", "Lock after moving away"))
         delayTitle.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
         delayTitle.textColor = .secondaryLabelColor
+        let delayHint = t("lock_delay_hint", "How long to wait before locking when the device moves out of range.")
+        delayTitle.toolTip = delayHint
+        delayTitle.maximumNumberOfLines = 1
+        delayTitle.lineBreakMode = .byTruncatingTail
 
         let delayLabels = ["2s", "5s", "15s", "30s", "1m", "2m", "5m"]
         delaySegmented.segmentCount = delayLabels.count
-        for (i, lbl) in delayLabels.enumerated() {
-            delaySegmented.setLabel(lbl, forSegment: i)
+        for (index, label) in delayLabels.enumerated() {
+            delaySegmented.setLabel(label, forSegment: index)
         }
         delaySegmented.controlSize = .small
         delaySegmented.font = NSFont.systemFont(ofSize: 11)
+        delaySegmented.setAccessibilityLabel(delayTitle.stringValue)
+        delaySegmented.toolTip = delayHint
         delaySegmented.target = self
         delaySegmented.action = #selector(delaySegmentChanged)
 
         let timeoutTitle = NSTextField(labelWithString: t("timeout", "无信号超时"))
         timeoutTitle.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
         timeoutTitle.textColor = .secondaryLabelColor
+        timeoutTitle.maximumNumberOfLines = 1
+        timeoutTitle.lineBreakMode = .byTruncatingTail
 
         let timeoutLabels = ["30s", "1m", "2m", "5m", "10m"]
         timeoutSegmented.segmentCount = timeoutLabels.count
@@ -826,8 +832,13 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         }
         timeoutSegmented.controlSize = .small
         timeoutSegmented.font = NSFont.systemFont(ofSize: 11)
+        timeoutSegmented.setAccessibilityLabel(timeoutTitle.stringValue)
         timeoutSegmented.target = self
         timeoutSegmented.action = #selector(timeoutSegmentChanged)
+
+        for control in [unlockSlider, lockSlider, delaySegmented, timeoutSegmented] as [NSControl] {
+            control.setContentCompressionResistancePriority(.required, for: .vertical)
+        }
 
         for v in [unlockEnableCheck, unlockValueLabel, unlockSlider, lockEnableCheck, lockValueLabel, lockSlider, delayTitle, delaySegmented, timeoutTitle, timeoutSegmented] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -835,38 +846,40 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         }
 
         NSLayoutConstraint.activate([
-            unlockEnableCheck.topAnchor.constraint(equalTo: thresholdBox.topAnchor, constant: 8),
-            unlockEnableCheck.leadingAnchor.constraint(equalTo: thresholdBox.leadingAnchor, constant: 10),
+            unlockEnableCheck.topAnchor.constraint(equalTo: thresholdBox.topAnchor, constant: 16),
+            unlockEnableCheck.leadingAnchor.constraint(equalTo: thresholdBox.leadingAnchor, constant: 16),
 
             unlockValueLabel.centerYAnchor.constraint(equalTo: unlockEnableCheck.centerYAnchor),
-            unlockValueLabel.trailingAnchor.constraint(equalTo: thresholdBox.trailingAnchor, constant: -10),
+            unlockValueLabel.trailingAnchor.constraint(equalTo: thresholdBox.trailingAnchor, constant: -16),
 
-            unlockSlider.topAnchor.constraint(equalTo: unlockEnableCheck.bottomAnchor, constant: 3),
-            unlockSlider.leadingAnchor.constraint(equalTo: thresholdBox.leadingAnchor, constant: 10),
-            unlockSlider.trailingAnchor.constraint(equalTo: thresholdBox.trailingAnchor, constant: -10),
+            unlockSlider.topAnchor.constraint(equalTo: unlockEnableCheck.bottomAnchor, constant: 8),
+            unlockSlider.leadingAnchor.constraint(equalTo: unlockEnableCheck.leadingAnchor),
+            unlockSlider.trailingAnchor.constraint(equalTo: unlockValueLabel.trailingAnchor),
 
-            lockEnableCheck.topAnchor.constraint(equalTo: unlockSlider.bottomAnchor, constant: 6),
-            lockEnableCheck.leadingAnchor.constraint(equalTo: thresholdBox.leadingAnchor, constant: 10),
+            lockEnableCheck.topAnchor.constraint(equalTo: unlockSlider.bottomAnchor, constant: 16),
+            lockEnableCheck.leadingAnchor.constraint(equalTo: unlockEnableCheck.leadingAnchor),
 
             lockValueLabel.centerYAnchor.constraint(equalTo: lockEnableCheck.centerYAnchor),
-            lockValueLabel.trailingAnchor.constraint(equalTo: thresholdBox.trailingAnchor, constant: -10),
+            lockValueLabel.trailingAnchor.constraint(equalTo: unlockValueLabel.trailingAnchor),
 
-            lockSlider.topAnchor.constraint(equalTo: lockEnableCheck.bottomAnchor, constant: 3),
-            lockSlider.leadingAnchor.constraint(equalTo: thresholdBox.leadingAnchor, constant: 10),
-            lockSlider.trailingAnchor.constraint(equalTo: thresholdBox.trailingAnchor, constant: -10),
+            lockSlider.topAnchor.constraint(equalTo: lockEnableCheck.bottomAnchor, constant: 8),
+            lockSlider.leadingAnchor.constraint(equalTo: unlockSlider.leadingAnchor),
+            lockSlider.trailingAnchor.constraint(equalTo: unlockSlider.trailingAnchor),
 
-            delayTitle.topAnchor.constraint(equalTo: lockSlider.bottomAnchor, constant: 8),
-            delayTitle.leadingAnchor.constraint(equalTo: thresholdBox.leadingAnchor, constant: 10),
+            delayTitle.leadingAnchor.constraint(equalTo: unlockEnableCheck.leadingAnchor),
+            delayTitle.centerYAnchor.constraint(equalTo: delaySegmented.centerYAnchor),
+            delayTitle.trailingAnchor.constraint(lessThanOrEqualTo: delaySegmented.leadingAnchor, constant: -12),
 
-            delaySegmented.centerYAnchor.constraint(equalTo: delayTitle.centerYAnchor),
-            delaySegmented.trailingAnchor.constraint(equalTo: thresholdBox.trailingAnchor, constant: -10),
+            delaySegmented.topAnchor.constraint(equalTo: lockSlider.bottomAnchor, constant: 20),
+            delaySegmented.trailingAnchor.constraint(equalTo: unlockValueLabel.trailingAnchor),
 
-            timeoutTitle.topAnchor.constraint(equalTo: delaySegmented.bottomAnchor, constant: 8),
-            timeoutTitle.leadingAnchor.constraint(equalTo: thresholdBox.leadingAnchor, constant: 10),
-            timeoutTitle.bottomAnchor.constraint(equalTo: thresholdBox.bottomAnchor, constant: -10),
+            timeoutTitle.leadingAnchor.constraint(equalTo: delayTitle.leadingAnchor),
+            timeoutTitle.centerYAnchor.constraint(equalTo: timeoutSegmented.centerYAnchor),
+            timeoutTitle.trailingAnchor.constraint(lessThanOrEqualTo: timeoutSegmented.leadingAnchor, constant: -12),
 
-            timeoutSegmented.centerYAnchor.constraint(equalTo: timeoutTitle.centerYAnchor),
-            timeoutSegmented.trailingAnchor.constraint(equalTo: thresholdBox.trailingAnchor, constant: -10)
+            timeoutSegmented.topAnchor.constraint(equalTo: delaySegmented.bottomAnchor, constant: 22),
+            timeoutSegmented.bottomAnchor.constraint(equalTo: thresholdBox.bottomAnchor, constant: -22),
+            timeoutSegmented.trailingAnchor.constraint(equalTo: delaySegmented.trailingAnchor)
         ])
 
         // Section 2: Two-column Wake/Unlock & Lock Behavior
@@ -980,7 +993,7 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
             button.font = .systemFont(ofSize: 11)
         }
         hideMenuBarIconCheck.title = t("hide_menu_bar_icon", "Hide Menu Bar Icon")
-        hideMenuBarIconCheck.toolTip = t("hide_menu_bar_icon_hint", "Reopen BLEUnlock from Finder or Spotlight to show the icon temporarily.")
+        hideMenuBarIconCheck.toolTip = t("hide_menu_bar_icon_hint", "Reopen BLEUnlock from Finder or Spotlight to open Settings below the menu bar icon.")
         hideMenuBarIconCheck.font = .systemFont(ofSize: 12)
         hideMenuBarIconCheck.target = self
         hideMenuBarIconCheck.action = #selector(togglePrefCheckbox(_:))
@@ -1011,7 +1024,7 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
             preferencesBox.topAnchor.constraint(equalTo: systemBox.bottomAnchor, constant: 8),
             preferencesBox.leadingAnchor.constraint(equalTo: settingsTabView.leadingAnchor),
             preferencesBox.trailingAnchor.constraint(equalTo: settingsTabView.trailingAnchor),
-            preferencesBox.bottomAnchor.constraint(lessThanOrEqualTo: settingsTabView.bottomAnchor),
+            preferencesBox.bottomAnchor.constraint(lessThanOrEqualTo: settingsTabView.bottomAnchor, constant: -12),
             preferencesBox.heightAnchor.constraint(equalToConstant: 34),
             preferences.leadingAnchor.constraint(equalTo: preferencesBox.leadingAnchor, constant: 10),
             preferences.trailingAnchor.constraint(equalTo: preferencesBox.trailingAnchor, constant: -10),
@@ -1106,9 +1119,7 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         }
 
         // Delay & Timeout
-        if let delayIdx = delayValues.firstIndex(of: Int(ble.proximityTimeout)) {
-            delaySegmented.selectedSegment = delayIdx
-        }
+        delaySegmented.selectedSegment = delayValues.firstIndex(of: Int(ble.proximityTimeout)) ?? -1
         if let timeoutIdx = timeoutValues.firstIndex(of: Int(ble.signalTimeout)) {
             timeoutSegmented.selectedSegment = timeoutIdx
         }
@@ -1300,9 +1311,9 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
     }
 
     @objc private func delaySegmentChanged() {
-        let idx = delaySegmented.selectedSegment
-        guard delayValues.indices.contains(idx) else { return }
-        let val = delayValues[idx]
+        let index = delaySegmented.selectedSegment
+        guard delayValues.indices.contains(index) else { return }
+        let val = delayValues[index]
         prefs.set(val, forKey: "lockDelay")
         ble.proximityTimeout = Double(val)
     }

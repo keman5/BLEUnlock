@@ -10,7 +10,8 @@
 "enter_rssi_threshold_info" = "Device whose RSSI is less than this value will be ignored while scanning.";
 "farther" = "⬇Farther";
 "launch_at_login" = "Launch at Login";
-"lock_delay" = "Delay to Lock";
+"lock_delay" = "Lock after moving away";
+"lock_delay_hint" = "How long to wait before locking when the device moves out of range.";
 "lock_now" = "Lock Screen Now";
 "lock_rssi" = "Lock RSSI";
 "minute" = "minute";
@@ -49,7 +50,7 @@
 "status_in_buffer_range" = "Buffer zone (Maintaining state)";
 
 "hide_menu_bar_icon" = "Hide Menu Bar Icon";
-"hide_menu_bar_icon_hint" = "Reopen BLEUnlock from Finder or Spotlight to show the icon temporarily.";
+"hide_menu_bar_icon_hint" = "Reopen BLEUnlock from Finder or Spotlight to open Settings below the menu bar icon.";
 "auto_lock_paused" = "Auto-lock paused";
 "pause_periods" = "Auto-Lock Pause Schedule";
 "pause_periods_button" = "Auto-Lock Schedule…";

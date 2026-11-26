@@ -15,7 +15,8 @@
 "enter_rssi_threshold_info" = "扫描设备时会忽略RSSI值低于该值的设备。";
 "farther" = "⬇远离";
 "launch_at_login" = "开机启动";
-"lock_delay" = "延迟锁定";
+"lock_delay" = "离开后锁屏";
+"lock_delay_hint" = "设备离开锁定范围后，等待这段时间再锁屏。";
 "lock_now" = "立刻锁定屏幕";
 "lock_rssi" = "锁定 RSSI";
 "minute" = "分钟";
@@ -55,7 +56,7 @@
 "status_in_buffer_range" = "缓冲区间（保持当前状态）";
 
 "hide_menu_bar_icon" = "隐藏菜单栏图标";
-"hide_menu_bar_icon_hint" = "从 Finder 或聚焦搜索重新打开 BLEUnlock，可临时显示菜单栏图标。";
+"hide_menu_bar_icon_hint" = "从 Finder 或聚焦搜索重新打开 BLEUnlock，即可在菜单栏图标下展开规则设置。";
 "auto_lock_paused" = "自动锁屏已暂停";
 "pause_periods" = "自动锁屏暂停时段";
 "pause_periods_button" = "自动锁屏暂停时段…";

@@ -203,8 +203,12 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var activeModeTimer : Timer? = nil
     var connectionTimer : Timer? = nil
 
-    func scanForPeripherals() {
-        guard centralMgr.state == .poweredOn, !centralMgr.isScanning else { return }
+    func scanForPeripherals(restart: Bool = false) {
+        guard centralMgr.state == .poweredOn else { return }
+        if centralMgr.isScanning {
+            guard restart else { return }
+            centralMgr.stopScan()
+        }
         centralMgr.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
         //print("Start scanning")
     }

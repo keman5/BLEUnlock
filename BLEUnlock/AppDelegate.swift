@@ -22,6 +22,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     private var pauseScheduleWindow: PauseScheduleWindow?
     private var deferredAutoLockReason: String?
     private var hasActivated = false
+    private var hasFinishedLaunching = false
+    private var menuBarRevealTimer: Timer?
+    private var localMenuBarMonitor: Any?
+    private var globalMenuBarMonitor: Any?
+    private var pendingMenuBarDismissal: DispatchWorkItem?
+    private var keepMenuBarIconVisibleUntil = 0.0
     var monitorMenuItem : NSMenuItem?
     let prefs = UserDefaults.standard
     var displaySleep = false
@@ -316,10 +322,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         refreshPauseSchedule()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: false, block: { _ in
             print("delayed system wake job")
-            NSApp.setActivationPolicy(.accessory)
             self.systemSleep = false
             if self.ble.activeModeTimer == nil {
-                self.ble.scanForPeripherals()
+                self.ble.scanForPeripherals(restart: true)
             }
             self.refreshPauseSchedule()
             self.tryUnlockScreen()
@@ -329,12 +334,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     @objc func onSystemSleep() {
         print("system sleep")
         systemSleep = true
-        // Set activation policy to regular, so the CBCentralManager can scan for peripherals
-        // when the Bluetooth will become on again.
-        // This enables Dock icon but the screen is off anyway.
-        if !prefs.bool(forKey: "hideMenuBarIcon") {
-            NSApp.setActivationPolicy(.regular)
-        }
     }
 
     @objc func onUnlock() {
@@ -364,7 +363,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     }
 
     @objc func toggleMenuBarPanel(_ sender: Any?) {
-        guard let button = statusItem.button else { return }
+        guard menuBarRevealTimer == nil, let button = statusItem.button else { return }
+        pendingMenuBarDismissal?.cancel()
+        pendingMenuBarDismissal = nil
+        if localMenuBarMonitor != nil {
+            // AppKit may restore the previous application's activation after a status item click.
+            keepMenuBarIconVisibleUntil = ProcessInfo.processInfo.systemUptime + 0.5
+        }
         menuBarPanel.toggle(relativeTo: button)
     }
 
@@ -426,43 +431,150 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     }
 
     private func setMenuBarIconHidden(_ hidden: Bool) {
+        stopTemporaryMenuBarReveal()
         prefs.set(hidden, forKey: "hideMenuBarIcon")
-        NSApp.setActivationPolicy(.accessory)
         statusItem.isVisible = !hidden
     }
 
-    private func revealMenuBarSettings() {
-        statusItem.isVisible = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self, self.statusItem.isVisible, NSApp.isActive,
-                  !self.menuBarPanel.isShown else { return }
-            self.menuBarPanel.selectSettings()
-            self.showDeviceList()
+    private func stopTemporaryMenuBarReveal() {
+        menuBarRevealTimer?.invalidate()
+        menuBarRevealTimer = nil
+        pendingMenuBarDismissal?.cancel()
+        pendingMenuBarDismissal = nil
+        if let monitor = localMenuBarMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMenuBarMonitor = nil
         }
+        if let monitor = globalMenuBarMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalMenuBarMonitor = nil
+        }
+        keepMenuBarIconVisibleUntil = 0
+        menuBarPanel.popover.behavior = .transient
+    }
+
+    private func hideTemporaryMenuBarIcon() {
+        guard prefs.bool(forKey: "hideMenuBarIcon"), statusItem.isVisible else { return }
+        stopTemporaryMenuBarReveal()
+        menuBarPanel.close()
+        statusItem.isVisible = false
+    }
+
+    private func monitorTemporaryMenuBarFocus() {
+        guard localMenuBarMonitor == nil else { return }
+        menuBarPanel.popover.behavior = .applicationDefined
+        let clicks: NSEvent.EventTypeMask = [.leftMouseUp, .rightMouseUp, .otherMouseUp]
+        localMenuBarMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks.union(.keyDown)) { [weak self] event in
+            guard let self = self else { return event }
+            if event.type == .keyDown {
+                if event.keyCode == 53 && self.menuBarPanel.isShown {
+                    self.keepMenuBarIconVisibleUntil = ProcessInfo.processInfo.systemUptime + 0.5
+                    self.menuBarPanel.close()
+                    return nil
+                }
+            } else {
+                self.handleMenuBarMouseUp(event)
+            }
+            return event
+        }
+        globalMenuBarMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] event in
+            self?.handleMenuBarMouseUp(event)
+        }
+    }
+
+    private func handleMenuBarMouseUp(_ event: NSEvent) {
+        let popoverWindow = menuBarPanel.isShown ? menuBarPanel.view.window : nil
+        if let window = event.window, window === statusItem.button?.window || window === popoverWindow {
+            return
+        }
+        let location = event.cgEvent?.unflippedLocation
+            ?? event.window?.convertPoint(toScreen: event.locationInWindow)
+            ?? event.locationInWindow
+        guard !statusButtonContains(location), popoverWindow?.frame.contains(location) != true else { return }
+
+        // Give the status item's action time to handle this mouse-up when AppKit routes it
+        // through the menu bar's window rather than the button's window.
+        pendingMenuBarDismissal?.cancel()
+        let dismissal = DispatchWorkItem { [weak self] in
+            self?.pendingMenuBarDismissal = nil
+            self?.hideTemporaryMenuBarIcon()
+        }
+        pendingMenuBarDismissal = dismissal
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: dismissal)
+    }
+
+    private func statusButtonContains(_ location: NSPoint) -> Bool {
+        guard let button = statusItem.button else { return false }
+        return menuBarButtonFrame(button)?.contains(location) == true
+    }
+
+    @objc private func anotherApplicationDidActivate(_ notification: Notification) {
+        guard localMenuBarMonitor != nil,
+              ProcessInfo.processInfo.systemUptime >= keepMenuBarIconVisibleUntil,
+              let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              app != NSRunningApplication.current else { return }
+        // The status item can still receive clicks while another app is active.
+        guard !statusButtonContains(NSEvent.mouseLocation) else { return }
+        hideTemporaryMenuBarIcon()
+    }
+
+    private func revealMenuBarSettings() {
+        menuBarPanel.selectSettings()
+        guard menuBarRevealTimer == nil, !menuBarPanel.isShown else { return }
+        statusItem.isVisible = true
+        monitorTemporaryMenuBarFocus()
+
+        // AppKit initially places a newly visible status button off the menu bar.
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        let timer = Timer(fire: Date().addingTimeInterval(0.15), interval: 0.05, repeats: true) { [weak self] timer in
+            guard let self = self else {
+                timer.invalidate()
+                return
+            }
+            if let button = self.statusItem.button, self.isInMenuBar(button) {
+                timer.invalidate()
+                self.menuBarRevealTimer = nil
+                self.menuBarPanel.show(relativeTo: button)
+            } else if ProcessInfo.processInfo.systemUptime >= deadline {
+                self.hideTemporaryMenuBarIcon()
+            }
+        }
+        menuBarRevealTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func isInMenuBar(_ button: NSStatusBarButton) -> Bool {
+        guard let buttonFrame = menuBarButtonFrame(button) else { return false }
+        return NSScreen.screens.contains { screen in
+            let screenFrame = screen.frame
+            return screenFrame.intersects(buttonFrame)
+                && buttonFrame.midY >= screenFrame.maxY - 2 * NSStatusBar.system.thickness
+        }
+    }
+
+    private func menuBarButtonFrame(_ button: NSStatusBarButton) -> NSRect? {
+        guard let window = button.window, window.isVisible else { return nil }
+        return window.convertToScreen(button.convert(button.bounds, to: nil))
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard prefs.bool(forKey: "hideMenuBarIcon") else { return true }
+        sender.activate(ignoringOtherApps: true)
         revealMenuBarSettings()
-        NSApp.activate(ignoringOtherApps: true)
         return false
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         let firstActivation = !hasActivated
         hasActivated = true
-        if prefs.bool(forKey: "hideMenuBarIcon") && (firstActivation || statusItem.isVisible) {
+        if firstActivation && hasFinishedLaunching && prefs.bool(forKey: "hideMenuBarIcon") {
             revealMenuBarSettings()
         }
     }
 
-    func applicationDidResignActive(_ notification: Notification) {
-        guard prefs.bool(forKey: "hideMenuBarIcon") else { return }
-        menuBarPanel.close()
-        statusItem.isVisible = false
-    }
-
     private func setupMenuBarPanel() {
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(anotherApplicationDidActivate(_:)),
+                                                           name: NSWorkspace.didActivateApplicationNotification, object: nil)
         menuBarPanel.onChooseDevice = { [weak self] uuid in
             self?.monitorDevice(uuid: uuid)
             self?.prefs.set(uuid.uuidString, forKey: "device")
@@ -474,7 +586,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
             guard let self = self else { return }
             let reopen = self.menuBarPanel.isShown
             self.askPassword()
-            if reopen, let button = self.statusItem.button {
+            if reopen, self.statusItem.isVisible, let button = self.statusItem.button {
                 self.menuBarPanel.show(relativeTo: button)
             }
         }
@@ -482,7 +594,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
             guard let self = self else { return }
             let reopen = self.menuBarPanel.isShown
             self.setRSSIThreshold()
-            if reopen, let button = self.statusItem.button {
+            if reopen, self.statusItem.isVisible, let button = self.statusItem.button {
                 self.menuBarPanel.show(relativeTo: button)
             }
         }
@@ -502,10 +614,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         }
         menuBarPanel.onHideMenuBarIcon = { [weak self] hidden in
             self?.setMenuBarIconHidden(hidden)
-        }
-        menuBarPanel.onClose = { [weak self] in
-            guard let self = self else { return }
-            self.statusItem.isVisible = !self.prefs.bool(forKey: "hideMenuBarIcon")
         }
         menuBarPanel.onQuit = {
             NSApp.terminate(nil)
@@ -873,6 +981,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         checkUpdate()
 
         setMenuBarIconHidden(prefs.bool(forKey: "hideMenuBarIcon"))
+        hasFinishedLaunching = true
         if prefs.bool(forKey: "hideMenuBarIcon") && NSApp.isActive {
             revealMenuBarSettings()
         }
