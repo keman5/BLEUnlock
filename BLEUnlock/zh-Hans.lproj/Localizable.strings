@@ -68,3 +68,10 @@
 "pause_end_time" = "结束时间";
 "pause_invalid_period" = "开始时间和结束时间必须不同。";
 "pause_save" = "保存";
+"auto_approve_authorization" = "自动批准管理员授权";
+"auto_approve_authorization_hint" = "仅在已选蓝牙设备靠近且系统授权弹窗等待输入密码时生效。";
+"authorization_all_apps" = "全部…";
+"authorization_list_apps" = "名单…";
+"authorization_apps_title" = "允许自动批准的程序";
+"authorization_apps_hint" = "留空表示全部程序。填写弹窗显示的程序名，用逗号分隔。Python 无法区分不同脚本。";
+"authorization_apps_placeholder" = "例如 Python, Installer";

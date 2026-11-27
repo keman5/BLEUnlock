@@ -22,6 +22,7 @@
 		3DD4B654226C1C3200451B7B /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DD4B653226C1C3200451B7B /* AppDelegate.swift */; };
 		8C13881AF07A20D500E1DB92 /* DeviceListWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C13881BF07A20D500E1DB92 /* DeviceListWindow.swift */; };
 		8C13881CF07A20D500E1DB92 /* PauseSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C13881DF07A20D500E1DB92 /* PauseSchedule.swift */; };
+		DF831B42E8304D118A734990 /* AuthorizationPromptMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF831B43E8304D118A734990 /* AuthorizationPromptMonitor.swift */; };
 		3DD4B659226C1C3400451B7B /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 3DD4B657226C1C3400451B7B /* MainMenu.xib */; };
 		3DD4B664226C1CF000451B7B /* lowlevel.c in Sources */ = {isa = PBXBuildFile; fileRef = 3DD4B663226C1CF000451B7B /* lowlevel.c */; };
 		3DD4B666226C1DF200451B7B /* BLE.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DD4B665226C1DF200451B7B /* BLE.swift */; };
@@ -72,6 +73,7 @@
 		3DD4B653226C1C3200451B7B /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		8C13881BF07A20D500E1DB92 /* DeviceListWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceListWindow.swift; sourceTree = "<group>"; };
 		8C13881DF07A20D500E1DB92 /* PauseSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PauseSchedule.swift; sourceTree = "<group>"; };
+		DF831B43E8304D118A734990 /* AuthorizationPromptMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizationPromptMonitor.swift; sourceTree = "<group>"; };
 		3DD4B658226C1C3400451B7B /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
 		3DD4B65B226C1C3400451B7B /* BLEUnlock.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BLEUnlock.entitlements; sourceTree = "<group>"; };
 		3DD4B661226C1CEF00451B7B /* BLEUnlock-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "BLEUnlock-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -149,6 +151,7 @@
 				3DD4B653226C1C3200451B7B /* AppDelegate.swift */,
 				8C13881BF07A20D500E1DB92 /* DeviceListWindow.swift */,
 				8C13881DF07A20D500E1DB92 /* PauseSchedule.swift */,
+				DF831B43E8304D118A734990 /* AuthorizationPromptMonitor.swift */,
 				3DC0BC6922728FF1001145EC /* Info.plist */,
 				3DCAAA7C22ADE9830011A2DA /* checkUpdate.swift */,
 				3DD4B662226C1CEF00451B7B /* lowlevel.h */,
@@ -313,6 +316,7 @@
 				3DD4B654226C1C3200451B7B /* AppDelegate.swift in Sources */,
 				8C13881AF07A20D500E1DB92 /* DeviceListWindow.swift in Sources */,
 				8C13881CF07A20D500E1DB92 /* PauseSchedule.swift in Sources */,
+				DF831B42E8304D118A734990 /* AuthorizationPromptMonitor.swift in Sources */,
 				3DD4B666226C1DF200451B7B /* BLE.swift in Sources */,
 				3DD4B664226C1CF000451B7B /* lowlevel.c in Sources */,
 				3DCAAA7D22ADE9830011A2DA /* checkUpdate.swift in Sources */,

@@ -1,5 +1,9 @@
 import Cocoa
 
+private final class FocusNeutralView: NSView {
+    override var acceptsFirstResponder: Bool { true }
+}
+
 struct DeviceListEntry: Equatable {
     let id: UUID
     let name: String
@@ -341,6 +345,7 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
     var onSetMinimumRSSI: (() -> Void)?
     var onToggleLaunchAtLogin: ((Bool) -> Void)?
     var onTogglePassiveMode: ((Bool) -> Void)?
+    var onAuthorizationSettingChanged: (() -> Void)?
     var onHideMenuBarIcon: ((Bool) -> Void)?
     var onEditPausePeriods: (() -> Void)?
     var onShowAbout: (() -> Void)?
@@ -402,6 +407,8 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
     private let pauseMediaCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let sleepDisplayCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let screensaverCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let autoApproveAuthorizationCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let authorizationAppsButton = NSButton()
 
     private let passiveModeCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let launchAtLoginCheck = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -918,12 +925,27 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         screensaverCheck.target = self
         screensaverCheck.action = #selector(togglePrefCheckbox(_:))
 
+        autoApproveAuthorizationCheck.title = t("auto_approve_authorization", "自动批准管理员授权")
+        autoApproveAuthorizationCheck.font = NSFont.systemFont(ofSize: 11)
+        autoApproveAuthorizationCheck.toolTip = t("auto_approve_authorization_hint", "仅在已选蓝牙设备靠近且系统授权弹窗等待输入密码时生效。")
+        autoApproveAuthorizationCheck.target = self
+        autoApproveAuthorizationCheck.action = #selector(togglePrefCheckbox(_:))
+        authorizationAppsButton.bezelStyle = .rounded
+        authorizationAppsButton.controlSize = .small
+        authorizationAppsButton.font = .systemFont(ofSize: 10)
+        authorizationAppsButton.target = self
+        authorizationAppsButton.action = #selector(editAuthorizationApps)
+        let authorizationRow = NSStackView(views: [autoApproveAuthorizationCheck, authorizationAppsButton])
+        authorizationRow.orientation = .horizontal
+        authorizationRow.alignment = .centerY
+        authorizationRow.spacing = 4
+
         let leftStack = NSStackView(views: [wakeOnProximityCheck, wakeWithoutUnlockCheck, passwordStatusLabel, setPasswordButton])
         leftStack.orientation = .vertical
         leftStack.alignment = .leading
         leftStack.spacing = 6
 
-        let rightStack = NSStackView(views: [pauseMediaCheck, sleepDisplayCheck, screensaverCheck])
+        let rightStack = NSStackView(views: [pauseMediaCheck, sleepDisplayCheck, screensaverCheck, authorizationRow])
         rightStack.orientation = .vertical
         rightStack.alignment = .leading
         rightStack.spacing = 6
@@ -1130,6 +1152,11 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
         pauseMediaCheck.state = prefs.bool(forKey: "pauseItunes") ? .on : .off
         sleepDisplayCheck.state = prefs.bool(forKey: "sleepDisplay") ? .on : .off
         screensaverCheck.state = prefs.bool(forKey: "screensaver") ? .on : .off
+        autoApproveAuthorizationCheck.state = prefs.bool(forKey: "autoApproveAuthorization") ? .on : .off
+        let allowedApps = prefs.stringArray(forKey: "authorizationAllowedApps") ?? []
+        authorizationAppsButton.title = allowedApps.isEmpty
+            ? t("authorization_all_apps", "全部…")
+            : t("authorization_list_apps", "名单…")
         passiveModeCheck.state = prefs.bool(forKey: "passiveMode") ? .on : .off
         launchAtLoginCheck.state = prefs.bool(forKey: "launchAtLogin") ? .on : .off
         hideMenuBarIconCheck.state = prefs.bool(forKey: "hideMenuBarIcon") ? .on : .off
@@ -1339,6 +1366,9 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
             prefs.set(isOn, forKey: "sleepDisplay")
         case screensaverCheck:
             prefs.set(isOn, forKey: "screensaver")
+        case autoApproveAuthorizationCheck:
+            prefs.set(isOn, forKey: "autoApproveAuthorization")
+            onAuthorizationSettingChanged?()
         case passiveModeCheck:
             prefs.set(isOn, forKey: "passiveMode")
             onTogglePassiveMode?(isOn)
@@ -1358,6 +1388,38 @@ final class MenuBarPanelViewController: NSViewController, NSTableViewDataSource,
 
     @objc private func handleSetPassword() {
         onAskPassword?()
+        syncControlsFromState()
+    }
+
+    @objc private func editAuthorizationApps() {
+        popover.performClose(nil)
+        let alert = NSAlert()
+        alert.messageText = t("authorization_apps_title", "允许自动批准的程序")
+        alert.informativeText = t("authorization_apps_hint", "留空表示全部程序。填写弹窗显示的程序名，用逗号分隔。Python 无法区分不同脚本。")
+        alert.addButton(withTitle: t("ok"))
+        alert.addButton(withTitle: t("cancel"))
+        let field = NSTextField()
+        field.stringValue = (prefs.stringArray(forKey: "authorizationAllowedApps") ?? []).joined(separator: ", ")
+        field.placeholderString = t("authorization_apps_placeholder", "例如 Python, Installer")
+        let accessory = FocusNeutralView(frame: NSRect(x: 0, y: 0, width: 340, height: 24))
+        field.translatesAutoresizingMaskIntoConstraints = false
+        accessory.addSubview(field)
+        NSLayoutConstraint.activate([
+            field.leadingAnchor.constraint(equalTo: accessory.leadingAnchor),
+            field.trailingAnchor.constraint(equalTo: accessory.trailingAnchor),
+            field.centerYAnchor.constraint(equalTo: accessory.centerYAnchor)
+        ])
+        accessory.nextKeyView = field
+        alert.accessoryView = accessory
+        alert.window.initialFirstResponder = accessory
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let names = field.stringValue
+            .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        prefs.set(Array(Set(names)).sorted(), forKey: "authorizationAllowedApps")
+        onAuthorizationSettingChanged?()
         syncControlsFromState()
     }
 

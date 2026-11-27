@@ -16,6 +16,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     let timeoutMenu = NSMenu()
     let lockDelayMenu = NSMenu()
     private lazy var menuBarPanel = MenuBarPanelViewController(ble: ble)
+    private lazy var authorizationMonitor = AuthorizationPromptMonitor(
+        preferences: prefs,
+        isEligible: { [weak self] in
+            guard let self, self.ble.monitoredUUID != nil, self.ble.presence,
+                  !self.systemSleep, !self.isScreenLocked(),
+                  let rssi = self.ble.lastObservedRSSI else { return false }
+            let threshold = self.ble.unlockRSSI == self.ble.UNLOCK_DISABLED ? -70 : self.ble.unlockRSSI
+            return rssi >= threshold && Date().timeIntervalSince1970 - self.ble.lastObservedAt < 15
+        },
+        password: { [weak self] in self?.fetchPassword(warn: false) }
+    )
     private var deviceListUpdate: Timer?
     private var pausePeriods: [PausePeriod] = []
     private var pauseScheduleTimer: Timer?
@@ -618,6 +629,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         menuBarPanel.onQuit = {
             NSApp.terminate(nil)
         }
+        menuBarPanel.onAuthorizationSettingChanged = { [weak self] in
+            self?.authorizationMonitor.refresh()
+        }
         menuBarPanel.hasStoredPassword = { [weak self] in
             self?.fetchPassword(warn: false) != nil
         }
@@ -681,11 +695,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
         }
         guard status == errSecSuccess else {
             let info = SecCopyErrorMessageString(status, nil)
-            errorModal("Failed to retrieve password", info: info as String? ?? "Status \(status)")
+            if warn {
+                errorModal("Failed to retrieve password", info: info as String? ?? "Status \(status)")
+            }
             return nil
         }
         guard let data = item as? Data else {
-            errorModal("Failed to convert password")
+            if warn { errorModal("Failed to convert password") }
             return nil
         }
         return String(data: data, encoding: .utf8)!
@@ -978,6 +994,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
             askPassword()
         }
         checkAccessibility()
+        authorizationMonitor.refresh()
         checkUpdate()
 
         setMenuBarIconHidden(prefs.bool(forKey: "hideMenuBarIcon"))
@@ -988,5 +1005,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemVa
     }
     
     func applicationWillTerminate(_ aNotification: Notification) {
+        authorizationMonitor.stop()
     }
 }

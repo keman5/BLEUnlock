@@ -62,3 +62,10 @@
 "pause_end_time" = "End time";
 "pause_invalid_period" = "Start and end times must be different.";
 "pause_save" = "Save";
+"auto_approve_authorization" = "Auto-Approve Admin";
+"auto_approve_authorization_hint" = "Approves a system prompt only while the monitored Bluetooth device is nearby.";
+"authorization_all_apps" = "All…";
+"authorization_list_apps" = "List…";
+"authorization_apps_title" = "Apps Allowed for Automatic Approval";
+"authorization_apps_hint" = "Leave blank to allow all apps. Enter the names shown by macOS, separated by commas. Python cannot distinguish individual scripts.";
+"authorization_apps_placeholder" = "For example, Python, Installer";

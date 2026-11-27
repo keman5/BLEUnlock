@@ -195,6 +195,8 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var proximityTimeout = 5.0
     var signalTimeout = 60.0
     var lastReadAt = 0.0
+    var lastObservedAt = 0.0
+    var lastObservedRSSI: Int?
     var powerWarn = true
     var passiveMode = false
     var thresholdRSSI = -70
@@ -248,6 +250,8 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             centralMgr.cancelPeripheralConnection(p)
         }
         monitoredUUID = uuid
+        lastObservedAt = 0
+        lastObservedRSSI = nil
         proximityTimer?.invalidate()
         proximityTimer = nil
         resetSignalTimer()
@@ -262,6 +266,8 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         signalTimer?.invalidate()
         signalTimer = Timer.scheduledTimer(withTimeInterval: signalTimeout, repeats: false, block: { _ in
             print("Device is lost")
+            self.lastObservedAt = 0
+            self.lastObservedRSSI = nil
             self.delegate?.updateRSSI(rssi: nil, active: false)
             if self.presence {
                 self.presence = false
@@ -284,6 +290,8 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         case .poweredOff:
             print("Bluetooth powered off")
             presence = false
+            lastObservedAt = 0
+            lastObservedRSSI = nil
             signalTimer?.invalidate()
             signalTimer = nil
             if powerWarn {
@@ -307,6 +315,8 @@ class BLE: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func updateMonitoredPeripheral(_ rssi: Int) {
+        lastObservedAt = Date().timeIntervalSince1970
+        lastObservedRSSI = rssi
         // print(String(format: "rssi: %d", rssi))
         if rssi >= (unlockRSSI == UNLOCK_DISABLED ? lockRSSI : unlockRSSI) && !presence {
             print("Device is close")
